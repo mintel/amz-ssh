@@ -20,7 +20,6 @@ import (
 	"golang.org/x/exp/slog"
 
 	"github.com/mintel/amz-ssh/pkg/sshutils"
-	"github.com/mintel/amz-ssh/pkg/update"
 )
 
 var version = "0.0.0"
@@ -28,10 +27,11 @@ var version = "0.0.0"
 func main() {
 	setupSignalHandlers()
 	app := &cli.App{
-		Name:    "amz-ssh",
-		Usage:   "connect to an ec2 instance via ec2 connect",
-		Version: version,
-		Action:  run,
+		Name:      "amz-ssh",
+		Usage:     "connect to an AWS EC2 instance via ec2-instance-connect",
+		Version:   version,
+		Action:    run,
+		UsageText: "amz-ssh [options] destination [destination...]\n\nDestination can be an IP address or instance ID.\nMultiple destinations will be treated as addition ssh proxies in addition to the ssh bastion.",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "region",
@@ -58,11 +58,6 @@ func main() {
 				Aliases: []string{"t"},
 				Usage:   "Host to tunnel to",
 			},
-			&cli.StringSliceFlag{
-				Name:    "destination",
-				Aliases: []string{"d"},
-				Usage:   "destination to ssh to via the bastion. This flag can be provided multiple times to allow for multiple hops",
-			},
 			&cli.IntFlag{
 				Name:    "port",
 				Aliases: []string{"p"},
@@ -76,13 +71,6 @@ func main() {
 			&cli.BoolFlag{
 				Name:  "debug",
 				Usage: "Print debug information",
-			},
-		},
-		Commands: []*cli.Command{
-			{
-				Name:   "update",
-				Usage:  "Update the cli",
-				Action: update.Handler,
 			},
 		},
 	}
@@ -153,7 +141,7 @@ func run(c *cli.Context) error {
 		bastionEndpoint,
 	}
 
-	for _, ep := range c.StringSlice("destination") {
+	for _, ep := range c.Args().Slice() {
 		destEndpoint, err := sshutils.NewEC2Endpoint(c.Context, ep, ec2Client, connectClient)
 		if err != nil {
 			return err
