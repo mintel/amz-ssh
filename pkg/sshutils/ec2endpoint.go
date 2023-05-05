@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -12,8 +13,8 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	connect "github.com/aws/aws-sdk-go-v2/service/ec2instanceconnect"
 	connecttypes "github.com/aws/aws-sdk-go-v2/service/ec2instanceconnect/types"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/exp/slog"
 )
 
 type EC2Endpoint struct {
@@ -65,7 +66,8 @@ func NewEC2Endpoint(ctx context.Context, InstanceID string, ec2Client *ec2.Clien
 func (e *EC2Endpoint) String() string {
 	err := sendPublicKey(context.TODO(), e.Instance, e.User, e.PublicKey, e.ConnectClient)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error(err.Error())
+		os.Exit(1)
 	}
 	if e.UsePrivate {
 		return fmt.Sprintf("%s:%d", aws.ToString(e.Instance.PrivateIpAddress), e.Port)
@@ -101,7 +103,7 @@ func sendPublicKey(ctx context.Context, instance *ec2types.Instance, user, publi
 	if err != nil {
 		var te *connecttypes.ThrottlingException
 		if errors.As(err, &te) {
-			log.Debug("Got throttling exception, usually just means the key is already valid")
+			slog.Debug("Got throttling exception, usually just means the key is already valid")
 			return nil
 		}
 

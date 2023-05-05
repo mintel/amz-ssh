@@ -15,8 +15,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	connect "github.com/aws/aws-sdk-go-v2/service/ec2instanceconnect"
-	log "github.com/sirupsen/logrus"
-	"github.com/urfave/cli/v2" // imports as package "cli"
+	cli "github.com/urfave/cli/v2"
+	"golang.org/x/exp/slog"
 
 	"github.com/mintel/amz-ssh/pkg/sshutils"
 	"github.com/mintel/amz-ssh/pkg/update"
@@ -62,7 +62,7 @@ func main() {
 			&cli.StringSliceFlag{
 				Name:    "destination",
 				Aliases: []string{"d"},
-				Usage:   "destination to ssh to via the bastion. This flag can be provided multiple times to allow for multple hops",
+				Usage:   "destination to ssh to via the bastion. This flag can be provided multiple times to allow for multiple hops",
 			},
 			&cli.IntFlag{
 				Name:    "port",
@@ -90,8 +90,8 @@ func main() {
 
 	err := app.Run(os.Args)
 	if err != nil {
-		log.Fatal(err)
-
+		slog.Error(err.Error())
+		os.Exit(1)
 	}
 }
 func setupSignalHandlers() {
@@ -105,9 +105,12 @@ func setupSignalHandlers() {
 }
 
 func run(c *cli.Context) error {
+	level := slog.LevelInfo
 	if c.Bool("debug") {
-		log.SetLevel(log.DebugLevel)
+		level = slog.LevelDebug
 	}
+	h := slog.HandlerOptions{Level: level}.NewTextHandler(os.Stderr)
+	slog.SetDefault(slog.New(h))
 
 	var tagName string
 	var tagValue string
@@ -196,7 +199,7 @@ func getInstanceByTag(ctx context.Context, ec2Client *ec2.Client, tagName, tagVa
 }
 
 func resolveBastionInstanceID(ctx context.Context, ec2Client *ec2.Client, tagName, tagValue string) (string, error) {
-	log.Info("Looking for bastion spot request")
+	slog.Info("Looking for bastion spot request")
 	siro, err := getSpotRequestByTag(ctx, ec2Client, tagName, tagValue)
 	if err != nil {
 		return "", err
@@ -206,7 +209,7 @@ func resolveBastionInstanceID(ctx context.Context, ec2Client *ec2.Client, tagNam
 		return aws.ToString(siro.SpotInstanceRequests[rand.Intn(len(siro.SpotInstanceRequests))].InstanceId), nil
 	}
 
-	log.Info("No spot requests found, looking for instance directly")
+	slog.Info("No spot requests found, looking for instance directly")
 	dio, err := getInstanceByTag(ctx, ec2Client, tagName, tagValue)
 	if err != nil {
 		return "", err
@@ -226,7 +229,8 @@ func ec2Client(region string) *ec2.Client {
 	// credentials, and shared configuration files
 	cfg, err := config.LoadDefaultConfig(context.Background())
 	if err != nil {
-		log.Fatalf("unable to load SDK config, %v", err)
+		slog.Error("unable to load SDK config", "err", err)
+		os.Exit(1)
 	}
 	return ec2.NewFromConfig(cfg)
 }
@@ -234,7 +238,8 @@ func ec2Client(region string) *ec2.Client {
 func connectClient(region string) *connect.Client {
 	cfg, err := config.LoadDefaultConfig(context.Background())
 	if err != nil {
-		log.Fatalf("unable to load SDK config, %v", err)
+		slog.Error("unable to load SDK config", "err", err)
+		os.Exit(1)
 	}
 	return connect.NewFromConfig(cfg)
 }

@@ -2,32 +2,31 @@ package sshutils
 
 import (
 	"fmt"
-
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/term"
-
 	"io"
 	"net"
 	"os"
+
+	"golang.org/x/exp/slog"
+	"golang.org/x/term"
 
 	"golang.org/x/crypto/ssh"
 )
 
 func Tunnel(localPort int, remoteHost EndpointIface, bastionHost EndpointIface) error {
-	log.Debug("Opening tunnel")
+	slog.Debug("Opening tunnel")
 
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", "localhost", localPort))
 	if err != nil {
 		return err
 	}
 	defer listener.Close()
-	log.Infof("listening on %v", listener.Addr().(*net.TCPAddr))
+	slog.Info(fmt.Sprintf("listening on %v", listener.Addr().(*net.TCPAddr)))
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			return err
 		}
-		log.Debug("accepted connection")
+		slog.Debug("accepted connection")
 		go forward(remoteHost, bastionHost, conn)
 	}
 }
@@ -35,27 +34,27 @@ func Tunnel(localPort int, remoteHost EndpointIface, bastionHost EndpointIface) 
 func forward(remoteHost, bastionEndpoint EndpointIface, localConn net.Conn) {
 	sshConfig, err := bastionEndpoint.GetSSHConfig()
 	if err != nil {
-		log.Error(err)
+		slog.Error(err.Error())
 	}
 
 	serverConn, err := ssh.Dial("tcp", bastionEndpoint.String(), sshConfig)
 	if err != nil {
-		log.Errorf("server dial error: %s", err)
+		slog.Error("server dial error", "err", err)
 		return
 	}
-	log.Debugf("connected to %s (1 of 2)", bastionEndpoint.String())
+	slog.Debug(fmt.Sprintf("connected to %s (1 of 2)", bastionEndpoint.String()))
 
 	remoteConn, err := serverConn.Dial("tcp", remoteHost.String())
 	if err != nil {
-		log.Errorf("remote dial error: %s", err)
+		slog.Error("remote dial error", "err", err)
 		return
 	}
-	log.Debugf("connected to %s (2 of 2)", remoteHost.String())
+	slog.Debug(fmt.Sprintf("connected to %s (2 of 2)", remoteHost.String()))
 
 	copyConn := func(writer, reader net.Conn) {
 		_, err := io.Copy(writer, reader)
 		if err != nil {
-			log.Errorf("io.Copy error: %s", err)
+			slog.Error("io.Copy error", "err", err)
 		}
 	}
 	go copyConn(localConn, remoteConn)
@@ -72,7 +71,7 @@ func Connect(bastionEndpoints ...EndpointIface) error {
 		}
 
 		serviceAddr := bastionEndpoint.String()
-		log.Infof("Attempting to connect to %s", serviceAddr)
+		slog.Info("Attempting to connect to " + serviceAddr)
 		// Tf this is the first endpint in the chain, create a new client
 		// Otherwise use the previous ssh client
 		if client == nil {
@@ -131,7 +130,8 @@ func Connect(bastionEndpoints ...EndpointIface) error {
 	}
 
 	if err := sess.Shell(); err != nil {
-		log.Fatalf("failed to start shell: %s", err)
+		slog.Error("failed to start shell", "err", err)
+		os.Exit(1)
 	}
 
 	return sess.Wait()
