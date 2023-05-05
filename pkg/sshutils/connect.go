@@ -2,8 +2,9 @@ package sshutils
 
 import (
 	"fmt"
+
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 
 	"io"
 	"net"
@@ -111,14 +112,14 @@ func Connect(bastionEndpoints ...EndpointIface) error {
 
 	fileDescriptor := int(os.Stdin.Fd())
 
-	if terminal.IsTerminal(fileDescriptor) {
-		originalState, err := terminal.MakeRaw(fileDescriptor)
+	if term.IsTerminal(fileDescriptor) {
+		originalState, err := term.MakeRaw(fileDescriptor)
 		if err != nil {
 			return nil
 		}
-		defer terminal.Restore(fileDescriptor, originalState)
+		defer term.Restore(fileDescriptor, originalState)
 
-		termWidth, termHeight, err := terminal.GetSize(fileDescriptor)
+		termWidth, termHeight, err := term.GetSize(fileDescriptor)
 		if err != nil {
 			return err
 		}
