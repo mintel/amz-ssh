@@ -1,15 +1,17 @@
 package sshutils
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/ec2"
-	connect "github.com/aws/aws-sdk-go/service/ec2instanceconnect"
-	"github.com/pkg/errors"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	connect "github.com/aws/aws-sdk-go-v2/service/ec2instanceconnect"
+	connecttypes "github.com/aws/aws-sdk-go-v2/service/ec2instanceconnect/types"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 )
@@ -22,12 +24,12 @@ type EC2Endpoint struct {
 	PublicKey  string
 	UsePrivate bool
 
-	Instance      *ec2.Instance
-	EC2Client     *ec2.EC2
-	ConnectClient *connect.EC2InstanceConnect
+	Instance      *ec2types.Instance
+	EC2Client     *ec2.Client
+	ConnectClient *connect.Client
 }
 
-func NewEC2Endpoint(InstanceID string, ec2Client *ec2.EC2, connectClient *connect.EC2InstanceConnect) (*EC2Endpoint, error) {
+func NewEC2Endpoint(ctx context.Context, InstanceID string, ec2Client *ec2.Client, connectClient *connect.Client) (*EC2Endpoint, error) {
 	endpoint := EC2Endpoint{
 		InstanceID:    InstanceID,
 		User:          "ec2-user",
@@ -52,7 +54,7 @@ func NewEC2Endpoint(InstanceID string, ec2Client *ec2.EC2, connectClient *connec
 		return &endpoint, err
 	}
 
-	endpoint.Instance, err = getEC2Instance(endpoint.InstanceID, endpoint.EC2Client)
+	endpoint.Instance, err = getEC2Instance(ctx, endpoint.InstanceID, endpoint.EC2Client)
 	if err != nil {
 		return &endpoint, err
 	}
@@ -61,15 +63,15 @@ func NewEC2Endpoint(InstanceID string, ec2Client *ec2.EC2, connectClient *connec
 }
 
 func (e *EC2Endpoint) String() string {
-	err := sendPublicKey(e.Instance, e.User, e.PublicKey, e.ConnectClient)
+	err := sendPublicKey(context.TODO(), e.Instance, e.User, e.PublicKey, e.ConnectClient)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if e.UsePrivate {
-		return fmt.Sprintf("%s:%d", aws.StringValue(e.Instance.PrivateIpAddress), e.Port)
+		return fmt.Sprintf("%s:%d", aws.ToString(e.Instance.PrivateIpAddress), e.Port)
 	}
 
-	return fmt.Sprintf("%s:%d", aws.StringValue(e.Instance.PublicIpAddress), e.Port)
+	return fmt.Sprintf("%s:%d", aws.ToString(e.Instance.PublicIpAddress), e.Port)
 }
 
 func (e *EC2Endpoint) GetSSHConfig() (*ssh.ClientConfig, error) {
@@ -87,9 +89,9 @@ func (e *EC2Endpoint) GetSSHConfig() (*ssh.ClientConfig, error) {
 	}, nil
 }
 
-func sendPublicKey(instance *ec2.Instance, user, publicKey string, client *connect.EC2InstanceConnect) error {
+func sendPublicKey(ctx context.Context, instance *ec2types.Instance, user, publicKey string, client *connect.Client) error {
 
-	out, err := client.SendSSHPublicKey(&connect.SendSSHPublicKeyInput{
+	out, err := client.SendSSHPublicKey(ctx, &connect.SendSSHPublicKeyInput{
 		AvailabilityZone: instance.Placement.AvailabilityZone,
 		InstanceId:       instance.InstanceId,
 		InstanceOSUser:   aws.String(user),
@@ -97,26 +99,25 @@ func sendPublicKey(instance *ec2.Instance, user, publicKey string, client *conne
 	})
 
 	if err != nil {
-		if awsErr, ok := err.(awserr.Error); ok {
-			if awsErr.Code() == connect.ErrCodeThrottlingException {
-				log.Debug("Got throttling exception, usually just means the key is already valid")
-				return nil
-			}
+		var te *connecttypes.ThrottlingException
+		if errors.As(err, &te) {
+			log.Debug("Got throttling exception, usually just means the key is already valid")
+			return nil
 		}
 
-		return errors.Wrap(err, "send public key error")
+		return fmt.Errorf("send public key error: %w", err)
 	}
 
-	if !*out.Success {
-		return fmt.Errorf("request failed but no error was returned. Request ID: %s", aws.StringValue(out.RequestId))
+	if !out.Success {
+		return fmt.Errorf("request failed but no error was returned. Request ID: %s", aws.ToString(out.RequestId))
 	}
 
 	return nil
 }
 
-func getEC2Instance(id string, client *ec2.EC2) (*ec2.Instance, error) {
-	instanceOutput, err := client.DescribeInstances(&ec2.DescribeInstancesInput{
-		InstanceIds: []*string{aws.String(id)},
+func getEC2Instance(ctx context.Context, id string, client *ec2.Client) (*ec2types.Instance, error) {
+	instanceOutput, err := client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+		InstanceIds: []string{id},
 	})
 
 	if err != nil {
@@ -127,5 +128,5 @@ func getEC2Instance(id string, client *ec2.EC2) (*ec2.Instance, error) {
 		return nil, errors.New("instance not found")
 	}
 
-	return instanceOutput.Reservations[0].Instances[0], nil
+	return &instanceOutput.Reservations[0].Instances[0], nil
 }

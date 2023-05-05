@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -10,10 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	awsSession "github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/ec2"
-	connect "github.com/aws/aws-sdk-go/service/ec2instanceconnect"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	connect "github.com/aws/aws-sdk-go-v2/service/ec2instanceconnect"
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2" // imports as package "cli"
 
@@ -125,14 +127,14 @@ func run(c *cli.Context) error {
 	instanceID := c.String("instance-id")
 	if instanceID == "" {
 		var err error
-		instanceID, err = resolveBastionInstanceID(ec2Client, tagName, tagValue)
+		instanceID, err = resolveBastionInstanceID(c.Context, ec2Client, tagName, tagValue)
 		if err != nil {
 			return err
 		}
 	}
 
 	bastionAddr := fmt.Sprintf("%s@%s:%d", c.String("user"), instanceID, c.Int("port"))
-	bastionEndpoint, err := sshutils.NewEC2Endpoint(bastionAddr, ec2Client, connectClient)
+	bastionEndpoint, err := sshutils.NewEC2Endpoint(c.Context, bastionAddr, ec2Client, connectClient)
 	if err != nil {
 		return err
 	}
@@ -150,7 +152,7 @@ func run(c *cli.Context) error {
 	}
 
 	for _, ep := range c.StringSlice("destination") {
-		destEndpoint, err := sshutils.NewEC2Endpoint(ep, ec2Client, connectClient)
+		destEndpoint, err := sshutils.NewEC2Endpoint(c.Context, ep, ec2Client, connectClient)
 		if err != nil {
 			return err
 		}
@@ -161,83 +163,80 @@ func run(c *cli.Context) error {
 	return sshutils.Connect(chain...)
 }
 
-func getSpotRequestByTag(ec2Client *ec2.EC2, tagName, tagValue string) (*ec2.DescribeSpotInstanceRequestsOutput, error) {
-	return ec2Client.DescribeSpotInstanceRequests(&ec2.DescribeSpotInstanceRequestsInput{
-		Filters: []*ec2.Filter{
+func getSpotRequestByTag(ctx context.Context, ec2Client *ec2.Client, tagName, tagValue string) (*ec2.DescribeSpotInstanceRequestsOutput, error) {
+	return ec2Client.DescribeSpotInstanceRequests(ctx, &ec2.DescribeSpotInstanceRequestsInput{
+		Filters: []ec2types.Filter{
 			{
 				Name:   aws.String("tag:" + tagName),
-				Values: aws.StringSlice([]string{tagValue}),
+				Values: []string{tagValue},
 			},
 			{
 				Name:   aws.String("state"),
-				Values: aws.StringSlice([]string{"active"}),
+				Values: []string{"active"},
 			},
 			{
 				Name:   aws.String("status-code"),
-				Values: aws.StringSlice([]string{"fulfilled"}),
+				Values: []string{"fulfilled"},
 			},
 		},
 	})
 }
 
-func getInstanceByTag(ec2Client *ec2.EC2, tagName, tagValue string) (*ec2.DescribeInstancesOutput, error) {
-	return ec2Client.DescribeInstances(&ec2.DescribeInstancesInput{
-		Filters: []*ec2.Filter{
+func getInstanceByTag(ctx context.Context, ec2Client *ec2.Client, tagName, tagValue string) (*ec2.DescribeInstancesOutput, error) {
+	return ec2Client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+		Filters: []ec2types.Filter{
 			{
 				Name:   aws.String("tag:" + tagName),
-				Values: aws.StringSlice([]string{tagValue}),
+				Values: []string{tagValue},
 			},
 			{
 				Name:   aws.String("instance-state-name"),
-				Values: aws.StringSlice([]string{"running"}),
+				Values: []string{"running"},
 			},
 		},
 	})
 }
 
-func resolveBastionInstanceID(ec2Client *ec2.EC2, tagName, tagValue string) (string, error) {
+func resolveBastionInstanceID(ctx context.Context, ec2Client *ec2.Client, tagName, tagValue string) (string, error) {
 	log.Info("Looking for bastion spot request")
-	siro, err := getSpotRequestByTag(ec2Client, tagName, tagValue)
+	siro, err := getSpotRequestByTag(ctx, ec2Client, tagName, tagValue)
 	if err != nil {
 		return "", err
 	}
 
 	if len(siro.SpotInstanceRequests) > 0 {
-		return aws.StringValue(siro.SpotInstanceRequests[rand.Intn(len(siro.SpotInstanceRequests))].InstanceId), nil
+		return aws.ToString(siro.SpotInstanceRequests[rand.Intn(len(siro.SpotInstanceRequests))].InstanceId), nil
 	}
 
 	log.Info("No spot requests found, looking for instance directly")
-	dio, err := getInstanceByTag(ec2Client, tagName, tagValue)
+	dio, err := getInstanceByTag(ctx, ec2Client, tagName, tagValue)
 	if err != nil {
 		return "", err
 	}
 
 	if len(dio.Reservations) > 0 {
 		res := dio.Reservations[rand.Intn(len(dio.Reservations))]
-		return aws.StringValue(res.Instances[rand.Intn(len(res.Instances))].InstanceId), nil
+		return aws.ToString(res.Instances[rand.Intn(len(res.Instances))].InstanceId), nil
 	}
 
 	return "", errors.New("unable to find any valid bastion instances")
 }
 
-func ec2Client(region string) *ec2.EC2 {
-	sess, err := awsSession.NewSession(&aws.Config{
-		Region: aws.String(region),
-	})
+func ec2Client(region string) *ec2.Client {
+	// Using the SDK's default configuration, loading additional config
+	// and credentials values from the environment variables, shared
+	// credentials, and shared configuration files
+	cfg, err := config.LoadDefaultConfig(context.Background())
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("unable to load SDK config, %v", err)
 	}
-
-	return ec2.New(sess)
+	return ec2.NewFromConfig(cfg)
 }
 
-func connectClient(region string) *connect.EC2InstanceConnect {
-	sess, err := awsSession.NewSession(&aws.Config{
-		Region: aws.String(region),
-	})
+func connectClient(region string) *connect.Client {
+	cfg, err := config.LoadDefaultConfig(context.Background())
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("unable to load SDK config, %v", err)
 	}
-
-	return connect.New(sess)
+	return connect.NewFromConfig(cfg)
 }
