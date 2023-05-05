@@ -10,7 +10,7 @@ import (
 //Handler replaces the current running binary with the latest version from github
 func Handler(c *cli.Context) error {
 	v := semver.MustParse(c.App.Version)
-	latest, err := selfupdate.UpdateSelf(v, "nodefortytwo/amz-ssh")
+	latest, err := selfupdate.UpdateSelf(v, "mintel/amz-ssh")
 	if err != nil {
 		log.Println("Binary update failed:", err)
 		return nil

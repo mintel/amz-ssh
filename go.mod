@@ -1,4 +1,4 @@
-module github.com/nodefortytwo/amz-ssh
+module github.com/mintel/amz-ssh
 
 go 1.20
 

@@ -18,8 +18,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2" // imports as package "cli"
 
-	"github.com/nodefortytwo/amz-ssh/pkg/sshutils"
-	"github.com/nodefortytwo/amz-ssh/pkg/update"
+	"github.com/mintel/amz-ssh/pkg/sshutils"
+	"github.com/mintel/amz-ssh/pkg/update"
 )
 
 var version = "0.0.0"

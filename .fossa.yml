@@ -5,10 +5,10 @@ version: 2
 cli:
   server: https://app.fossa.com
   fetcher: custom
-  project: https://github.com/nodefortytwo/amz-ssh.git
+  project: https://github.com/mintel/amz-ssh.git
 analyze:
   modules:
-  - name: github.com/nodefortytwo/amz-ssh
+  - name: github.com/mintel/amz-ssh
     type: go
-    target: github.com/nodefortytwo/amz-ssh
+    target: github.com/mintel/amz-ssh
     path: .
