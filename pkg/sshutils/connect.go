@@ -6,10 +6,9 @@ import (
 	"net"
 	"os"
 
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/exp/slog"
 	"golang.org/x/term"
-
-	"golang.org/x/crypto/ssh"
 )
 
 func Tunnel(localPort int, remoteHost EndpointIface, bastionHost EndpointIface) error {
@@ -71,8 +70,8 @@ func Connect(bastionEndpoints ...EndpointIface) error {
 		}
 
 		serviceAddr := bastionEndpoint.String()
-		slog.Info("Attempting to connect to " + serviceAddr)
-		// Tf this is the first endpint in the chain, create a new client
+		slog.Debug("Attempting to connect to " + serviceAddr)
+		// Tf this is the first endpoint in the chain, create a new client
 		// Otherwise use the previous ssh client
 		if client == nil {
 			client, err = ssh.Dial("tcp", serviceAddr, sshConfig)

@@ -16,6 +16,7 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	connect "github.com/aws/aws-sdk-go-v2/service/ec2instanceconnect"
 	cli "github.com/urfave/cli/v2"
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/exp/slog"
 
 	"github.com/mintel/amz-ssh/pkg/sshutils"
@@ -35,8 +36,6 @@ func main() {
 			&cli.StringFlag{
 				Name:    "region",
 				Aliases: []string{"r"},
-				EnvVars: []string{"AWS_REGION"},
-				Value:   "eu-west-1",
 			},
 			&cli.StringFlag{
 				Name:  "tag",
@@ -90,6 +89,9 @@ func main() {
 
 	err := app.Run(os.Args)
 	if err != nil {
+		if ee, ok := err.(*ssh.ExitError); ok {
+			os.Exit(ee.ExitStatus())
+		}
 		slog.Error(err.Error())
 		os.Exit(1)
 	}
@@ -122,8 +124,7 @@ func run(c *cli.Context) error {
 		return fmt.Errorf("%s is not a valid tag definition, use key:value", c.String("tag"))
 	}
 
-	ec2Client := ec2Client(c.String("region"))
-	connectClient := connectClient(c.String("region"))
+	ec2Client, connectClient := getClients(c.Context, c.String("region"))
 
 	instanceID := c.String("instance-id")
 	if instanceID == "" {
@@ -199,7 +200,7 @@ func getInstanceByTag(ctx context.Context, ec2Client *ec2.Client, tagName, tagVa
 }
 
 func resolveBastionInstanceID(ctx context.Context, ec2Client *ec2.Client, tagName, tagValue string) (string, error) {
-	slog.Info("Looking for bastion spot request")
+	slog.Debug("Looking for bastion spot request")
 	siro, err := getSpotRequestByTag(ctx, ec2Client, tagName, tagValue)
 	if err != nil {
 		return "", err
@@ -209,7 +210,7 @@ func resolveBastionInstanceID(ctx context.Context, ec2Client *ec2.Client, tagNam
 		return aws.ToString(siro.SpotInstanceRequests[rand.Intn(len(siro.SpotInstanceRequests))].InstanceId), nil
 	}
 
-	slog.Info("No spot requests found, looking for instance directly")
+	slog.Debug("No spot requests found, looking for instance directly")
 	dio, err := getInstanceByTag(ctx, ec2Client, tagName, tagValue)
 	if err != nil {
 		return "", err
@@ -223,23 +224,15 @@ func resolveBastionInstanceID(ctx context.Context, ec2Client *ec2.Client, tagNam
 	return "", errors.New("unable to find any valid bastion instances")
 }
 
-func ec2Client(region string) *ec2.Client {
-	// Using the SDK's default configuration, loading additional config
-	// and credentials values from the environment variables, shared
-	// credentials, and shared configuration files
-	cfg, err := config.LoadDefaultConfig(context.Background())
+func getClients(ctx context.Context, region string) (*ec2.Client, *connect.Client) {
+	var opts []func(*config.LoadOptions) error
+	if region != "" {
+		opts = append(opts, config.WithRegion(region))
+	}
+	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		slog.Error("unable to load SDK config", "err", err)
 		os.Exit(1)
 	}
-	return ec2.NewFromConfig(cfg)
-}
-
-func connectClient(region string) *connect.Client {
-	cfg, err := config.LoadDefaultConfig(context.Background())
-	if err != nil {
-		slog.Error("unable to load SDK config", "err", err)
-		os.Exit(1)
-	}
-	return connect.NewFromConfig(cfg)
+	return ec2.NewFromConfig(cfg), connect.NewFromConfig(cfg)
 }
